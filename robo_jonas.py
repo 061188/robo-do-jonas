@@ -3,7 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 
-# --- CONFIGURAÇÃO DO DONO DO SISTEMA ---
+# --- CONFIGURAÇÃO ---
 EMAIL_DONO = "Jonassssantana41@gmail.com" 
 
 st.set_page_config(page_title="Gestão do Jonas", layout="centered")
@@ -14,10 +14,8 @@ conn = sqlite3.connect('gestao_irmao.db', check_same_thread=False)
 # Escolha do negócio
 negocio = st.sidebar.radio("Selecione o Negócio:", ["🍺 BAR", "🚧 OBRA"])
 
-# --- PAINEL DE GANHOS E PERDAS ---
+# --- PAINEL FINANCEIRO ---
 st.subheader(f"📊 Resumo Financeiro - {negocio}")
-
-# Buscamos os dados para fazer a conta
 df_total = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
 
 if not df_total.empty:
@@ -27,7 +25,7 @@ if not df_total.empty:
     
     col1, col2, col3 = st.columns(3)
     col1.metric("Ganhos", f"R$ {ganhos:.2f}")
-    col2.metric("Gastos", f"R$ {gastos:.2f}", delta_color="inverse")
+    col2.metric("Gastos", f"R$ {gastos:.2f}")
     col3.metric("Saldo", f"R$ {saldo:.2f}")
 st.divider()
 
@@ -51,23 +49,28 @@ with st.form("formulario", clear_on_submit=True):
         cursor.execute("INSERT INTO financeiro (data, negocio, descricao, valor, tipo, categoria) VALUES (?,?,?,?,?,?)",
                        (str(data), negocio, descricao, valor, tipo, categoria))
         conn.commit()
-        st.success(f"Lançamento feito com sucesso para o e-mail {EMAIL_DONO}!")
+        st.success(f"Salvo com sucesso!")
         st.rerun()
 
+# --- ABA DE EDIÇÃO E EXCLUSÃO ---
+st.divider()
+st.subheader("🗑️ Editar ou Excluir Lançamentos")
+
+if not df_total.empty:
+    # Criamos uma lista de descrições para a pessoa escolher qual quer apagar
+    opcoes = df_total['descricao'].tolist()
+    item_para_excluir = st.selectbox("Selecione o lançamento para excluir:", ["Selecione..."] + opcoes)
+
+    if st.button("EXCLUIR LANÇAMENTO SELECIONADO"):
+        if item_para_excluir != "Selecione...":
+            cursor = conn.cursor()
+            cursor.execute(f"DELETE FROM financeiro WHERE descricao = '{item_para_excluir}' AND negocio = '{negocio}'")
+            conn.commit()
+            st.warning(f"Lançamento '{item_para_excluir}' foi apagado!")
+            st.rerun()
+        else:
+            st.info("Por favor, selecione um item na lista acima.")
+
 # Tabela de histórico
-if st.checkbox("Mostrar histórico completo"):
+if st.checkbox("Ver tabela completa"):
     st.dataframe(df_total)
-    st.divider()
-
-st.subheader("⏰ Agendar Aviso de Pagamento")
-
-with st.form("lembrete_pagamento", clear_on_submit=True):
-    conta = st.text_input("Qual conta precisa pagar? (Ex: Luz do Bar)")
-    vencimento = st.date_input("Data de Vencimento")
-    valor_conta = st.number_input("Valor Estimado (R$)", min_value=0.0)
-    dias_antes = st.slider("Avisar quantos dias antes?", 1, 7, 2)
-    
-    botao_aviso = st.form_submit_button("AGENDAR AVISO")
-
-    if botao_aviso:
-        st.success(f"Beleza! O aviso para '{conta}' foi configurado para o e-mail: {EMAIL_DONO}")
