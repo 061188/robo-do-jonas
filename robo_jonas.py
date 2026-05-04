@@ -5,7 +5,6 @@ from datetime import datetime
 import hashlib
 
 # --- CONFIGURAÇÃO DA PÁGINA E LOGO ---
-# Se você subir um arquivo chamado logo_jonas.png, ele aparecerá no topo
 st.set_page_config(page_title="Gestão do Jonas", page_icon="🏗️", layout="centered")
 
 def carregar_logo():
@@ -18,12 +17,13 @@ def carregar_logo():
 conn = sqlite3.connect('gestao_irmao.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Criar tabela de usuários se não existir
+# Criar tabelas se não existirem
 cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios 
                   (usuario TEXT PRIMARY KEY, senha TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS financeiro 
+                  (data TEXT, negocio TEXT, descricao TEXT, valor REAL, tipo TEXT, categoria TEXT)''')
 conn.commit()
 
-# Função simples para transformar senha em código secreto (Hash)
 def gerar_hash(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
@@ -35,7 +35,6 @@ def login():
     carregar_logo()
     st.subheader("Login de Acesso")
     
-    # Verifica se já existe algum usuário cadastrado
     usuarios = pd.read_sql_query("SELECT * FROM usuarios", conn)
     
     if usuarios.empty:
@@ -59,11 +58,10 @@ def login():
             else:
                 st.error("Usuário ou senha incorretos")
 
-# --- APP PRINCIPAL (SÓ APARECE SE ESTIVER LOGADO) ---
+# --- APP PRINCIPAL ---
 if not st.session_state['autenticado']:
     login()
 else:
-    # Menu Lateral
     st.sidebar.title("Menu")
     pagina = st.sidebar.selectbox("Ir para:", ["Dashboard", "Configurações"])
     negocio = st.sidebar.radio("Selecione o Negócio:", ["🍺 BAR", "🚧 OBRA"])
@@ -74,16 +72,36 @@ else:
 
     if pagina == "Dashboard":
         carregar_logo()
-        # ... (Aqui continua todo o código de Ganhos/Gastos que já tínhamos)
         st.subheader(f"📊 Resumo Financeiro - {negocio}")
-        df_total = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
-        # (O resto do seu código de lançamentos e exclusão entra aqui...)
         
+        df_total = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
+
+        if not df_total.empty:
+            ganhos = df_total[df_total['tipo'].str.contains("Ganho")]['valor'].sum()
+            gastos = df_total[df_total['tipo'].str.contains("Gasto")]['valor'].sum()
+            saldo = ganhos - gastos
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Ganhos", f"R$ {ganhos:.2f}")
+            col2.metric("Gastos", f"R$ {gastos:.2f}")
+            col3.metric("Saldo", f"R$ {saldo:.2f}")
+
+        st.divider()
+        st.write(f"📝 Novo Lançamento: {negocio}")
+        with st.form("formulario", clear_on_submit=True):
+            data = st.date_input("Data", datetime.now())
+            desc = st.text_input("O que aconteceu?")
+            val = st.number_input("Valor (R$)", min_value=0.0, step=0.01)
+            cat = st.selectbox("Categoria", ["Material", "Contas", "Vendas", "Ajudante", "Valor Obra"])
+            tp = st.radio("Tipo:", ["Ganho (Entrada 🟢)", "Gasto (Saída 🔴)"])
+            if st.form_submit_button("SALVAR"):
+                cursor.execute("INSERT INTO financeiro VALUES (?,?,?,?,?,?)", (str(data), negocio, desc, val, tp, cat))
+                conn.commit()
+                st.rerun()
+
     elif pagina == "Configurações":
         st.subheader("⚙️ Configurações de Acesso")
-        st.write("Deseja alterar sua senha?")
-        nova_senha = st.text_input("Nova Senha", type="password")
+        nova_s = st.text_input("Nova Senha", type="password")
         if st.button("ATUALIZAR SENHA"):
-            cursor.execute("UPDATE usuarios SET senha = ?", (gerar_hash(nova_senha),))
+            cursor.execute("UPDATE usuarios SET senha = ?", (gerar_hash(nova_s),))
             conn.commit()
-            st.success("Senha alterada com sucesso!")
+            st.success("Senha alterada!")
