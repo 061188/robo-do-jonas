@@ -4,104 +4,104 @@ import pandas as pd
 from datetime import datetime
 import hashlib
 
-# --- CONFIGURAÇÃO DA PÁGINA E LOGO ---
+# --- 1. CONFIGURAÇÃO DA CARA DO APP ---
 st.set_page_config(page_title="Gestão do Jonas", page_icon="🏗️", layout="centered")
 
-def carregar_logo():
+def mostrar_logo():
     try:
+        # Aqui ele procura a imagem que você acabou de renomear!
         st.image("logo_jonas.png", width=150)
     except:
         st.title("🏗️ Gestão: Bar & Obra")
 
-# --- FUNÇÕES DE BANCO DE DADOS ---
+# --- 2. CONECTAR NO CADERNINHO (BANCO DE DADOS) ---
 conn = sqlite3.connect('gestao_irmao.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Criar tabelas se não existirem
-cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios 
-                  (usuario TEXT PRIMARY KEY, senha TEXT)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS financeiro 
-                  (data TEXT, negocio TEXT, descricao TEXT, valor REAL, tipo TEXT, categoria TEXT)''')
+# Criando as tabelas (pastas) dentro do banco se elas não existirem
+cursor.execute('CREATE TABLE IF NOT EXISTS usuarios (usuario TEXT PRIMARY KEY, senha TEXT)')
+cursor.execute('CREATE TABLE IF NOT EXISTS financeiro (data TEXT, negocio TEXT, descricao TEXT, valor REAL, tipo TEXT, categoria TEXT)')
 conn.commit()
 
-def gerar_hash(senha):
+# Função para transformar a senha em um código secreto (Segurança)
+def transformar_em_codigo(senha):
     return hashlib.sha256(str.encode(senha)).hexdigest()
 
-# --- LÓGICA DE ACESSO ---
-if 'autenticado' not in st.session_state:
-    st.session_state['autenticado'] = False
+# --- 3. SISTEMA DE LOGIN ---
+if 'logado' not in st.session_state:
+    st.session_state['logado'] = False
 
-def login():
-    carregar_logo()
-    st.subheader("Login de Acesso")
+def tela_login():
+    mostrar_logo()
+    st.subheader("🔑 Acesso Restrito")
     
-    usuarios = pd.read_sql_query("SELECT * FROM usuarios", conn)
+    # Verifica se já tem alguém cadastrado
+    check_user = pd.read_sql_query("SELECT * FROM usuarios", conn)
     
-    if usuarios.empty:
-        st.warning("Nenhum usuário encontrado. Crie o primeiro acesso:")
-        novo_u = st.text_input("Defina seu Usuário")
-        nova_s = st.text_input("Defina sua Senha", type="password")
+    if check_user.empty:
+        st.info("Primeiro acesso! Defina quem vai mandar aqui:")
+        novo_u = st.text_input("Escolha um nome de usuário")
+        nova_s = st.text_input("Escolha uma senha", type="password")
         if st.button("CRIAR MEU ACESSO"):
-            cursor.execute("INSERT INTO usuarios VALUES (?, ?)", (novo_u, gerar_hash(nova_s)))
+            cursor.execute("INSERT INTO usuarios VALUES (?, ?)", (novo_u, transformar_em_codigo(nova_s)))
             conn.commit()
-            st.success("Acesso criado! Agora faça login.")
+            st.success("Acesso criado com sucesso! Agora é só entrar.")
             st.rerun()
     else:
-        user = st.text_input("Usuário")
-        pw = st.text_input("Senha", type="password")
+        u = st.text_input("Usuário")
+        s = st.text_input("Senha", type="password")
         if st.button("ENTRAR"):
-            senha_hash = gerar_hash(pw)
-            busca = cursor.execute("SELECT * FROM usuarios WHERE usuario=? AND senha=?", (user, senha_hash)).fetchone()
+            senha_secreta = transformar_em_codigo(s)
+            busca = cursor.execute("SELECT * FROM usuarios WHERE usuario=? AND senha=?", (u, senha_secreta)).fetchone()
             if busca:
-                st.session_state['autenticado'] = True
+                st.session_state['logado'] = True
                 st.rerun()
             else:
-                st.error("Usuário ou senha incorretos")
+                st.error("Usuário ou senha errados!")
 
-# --- APP PRINCIPAL ---
-if not st.session_state['autenticado']:
-    login()
+# --- 4. O QUE APARECE DEPOIS DO LOGIN ---
+if not st.session_state['logado']:
+    tela_login()
 else:
-    st.sidebar.title("Menu")
-    pagina = st.sidebar.selectbox("Ir para:", ["Dashboard", "Configurações"])
-    negocio = st.sidebar.radio("Selecione o Negócio:", ["🍺 BAR", "🚧 OBRA"])
+    # Se chegou aqui, é porque logou!
+    st.sidebar.title(f"Bem-vindo!")
+    opcao = st.sidebar.radio("O que quer fazer?", ["Lançamentos", "Configurar Senha"])
+    negocio = st.sidebar.selectbox("Escolha o Negócio", ["🍺 BAR", "🚧 OBRA"])
     
     if st.sidebar.button("Sair"):
-        st.session_state['autenticado'] = False
+        st.session_state['logado'] = False
         st.rerun()
 
-    if pagina == "Dashboard":
-        carregar_logo()
-        st.subheader(f"📊 Resumo Financeiro - {negocio}")
+    if opcao == "Lançamentos":
+        mostrar_logo()
+        st.subheader(f"📊 Painel {negocio}")
         
-        df_total = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
+        # Aqui entra aquela parte de mostrar a tabela e o formulário que já conhecemos
+        df = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
+        
+        # Mostra o Saldo
+        if not df.empty:
+            ganhos = df[df['tipo'].str.contains("Ganho")]['valor'].sum()
+            gastos = df[df['tipo'].str.contains("Gasto")]['valor'].sum()
+            st.metric("Saldo Atual", f"R$ {ganhos - gastos:.2f}")
 
-        if not df_total.empty:
-            ganhos = df_total[df_total['tipo'].str.contains("Ganho")]['valor'].sum()
-            gastos = df_total[df_total['tipo'].str.contains("Gasto")]['valor'].sum()
-            saldo = ganhos - gastos
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Ganhos", f"R$ {ganhos:.2f}")
-            col2.metric("Gastos", f"R$ {gastos:.2f}")
-            col3.metric("Saldo", f"R$ {saldo:.2f}")
-
-        st.divider()
-        st.write(f"📝 Novo Lançamento: {negocio}")
-        with st.form("formulario", clear_on_submit=True):
-            data = st.date_input("Data", datetime.now())
-            desc = st.text_input("O que aconteceu?")
-            val = st.number_input("Valor (R$)", min_value=0.0, step=0.01)
-            cat = st.selectbox("Categoria", ["Material", "Contas", "Vendas", "Ajudante", "Valor Obra"])
-            tp = st.radio("Tipo:", ["Ganho (Entrada 🟢)", "Gasto (Saída 🔴)"])
-            if st.form_submit_button("SALVAR"):
-                cursor.execute("INSERT INTO financeiro VALUES (?,?,?,?,?,?)", (str(data), negocio, desc, val, tp, cat))
+        # Formulário para salvar novo gasto/ganho
+        with st.form("meu_form", clear_on_submit=True):
+            d = st.date_input("Data", datetime.now())
+            desc = st.text_input("Descrição")
+            v = st.number_input("Valor (R$)", min_value=0.0)
+            t = st.radio("Tipo", ["Ganho (Entrada 🟢)", "Gasto (Saída 🔴)"])
+            if st.form_submit_button("SALVAR NOVO"):
+                cursor.execute("INSERT INTO financeiro (data, negocio, descricao, valor, tipo) VALUES (?,?,?,?,?)", 
+                               (str(d), negocio, desc, v, t))
                 conn.commit()
+                st.success("Salvo!")
                 st.rerun()
 
-    elif pagina == "Configurações":
-        st.subheader("⚙️ Configurações de Acesso")
-        nova_s = st.text_input("Nova Senha", type="password")
-        if st.button("ATUALIZAR SENHA"):
-            cursor.execute("UPDATE usuarios SET senha = ?", (gerar_hash(nova_s),))
+    elif opcao == "Configurar Senha":
+        st.subheader("⚙️ Alterar Senha")
+        nova_s = st.text_input("Digite a nova senha", type="password")
+        if st.button("SALVAR NOVA SENHA"):
+            cursor.execute("UPDATE usuarios SET senha = ?", (transformar_em_codigo(nova_s),))
             conn.commit()
-            st.success("Senha alterada!")
+            st.success("Senha atualizada!")
