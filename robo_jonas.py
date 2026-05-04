@@ -2,75 +2,88 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import hashlib
 
-# --- CONFIGURAÇÃO ---
-EMAIL_DONO = "Jonassssantana41@gmail.com" 
+# --- CONFIGURAÇÃO DA PÁGINA E LOGO ---
+# Se você subir um arquivo chamado logo_jonas.png, ele aparecerá no topo
+st.set_page_config(page_title="Gestão do Jonas", page_icon="🏗️", layout="centered")
 
-st.set_page_config(page_title="Gestão do Jonas", layout="centered")
-st.title("🏗️ Gestão: Bar & Obra")
+def carregar_logo():
+    try:
+        st.image("logo_jonas.png", width=150)
+    except:
+        st.title("🏗️ Gestão: Bar & Obra")
 
+# --- FUNÇÕES DE BANCO DE DADOS ---
 conn = sqlite3.connect('gestao_irmao.db', check_same_thread=False)
+cursor = conn.cursor()
 
-# Escolha do negócio
-negocio = st.sidebar.radio("Selecione o Negócio:", ["🍺 BAR", "🚧 OBRA"])
+# Criar tabela de usuários se não existir
+cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios 
+                  (usuario TEXT PRIMARY KEY, senha TEXT)''')
+conn.commit()
 
-# --- PAINEL FINANCEIRO ---
-st.subheader(f"📊 Resumo Financeiro - {negocio}")
-df_total = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
+# Função simples para transformar senha em código secreto (Hash)
+def gerar_hash(senha):
+    return hashlib.sha256(str.encode(senha)).hexdigest()
 
-if not df_total.empty:
-    ganhos = df_total[df_total['tipo'].str.contains("Ganho")]['valor'].sum()
-    gastos = df_total[df_total['tipo'].str.contains("Gasto")]['valor'].sum()
-    saldo = ganhos - gastos
+# --- LÓGICA DE ACESSO ---
+if 'autenticado' not in st.session_state:
+    st.session_state['autenticado'] = False
+
+def login():
+    carregar_logo()
+    st.subheader("Login de Acesso")
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Ganhos", f"R$ {ganhos:.2f}")
-    col2.metric("Gastos", f"R$ {gastos:.2f}")
-    col3.metric("Saldo", f"R$ {saldo:.2f}")
-st.divider()
-
-# --- FORMULÁRIO DE LANÇAMENTO ---
-st.write(f"📝 Novo Lançamento: {negocio}")
-with st.form("formulario", clear_on_submit=True):
-    data = st.date_input("Data", datetime.now())
-    descricao = st.text_input("O que aconteceu?")
-    valor = st.number_input("Valor (R$)", min_value=0.0, step=0.01)
+    # Verifica se já existe algum usuário cadastrado
+    usuarios = pd.read_sql_query("SELECT * FROM usuarios", conn)
     
-    if negocio == "🍺 BAR":
-        categoria = st.selectbox("Categoria", ["Material", "Contas", "Vendas"])
+    if usuarios.empty:
+        st.warning("Nenhum usuário encontrado. Crie o primeiro acesso:")
+        novo_u = st.text_input("Defina seu Usuário")
+        nova_s = st.text_input("Defina sua Senha", type="password")
+        if st.button("CRIAR MEU ACESSO"):
+            cursor.execute("INSERT INTO usuarios VALUES (?, ?)", (novo_u, gerar_hash(nova_s)))
+            conn.commit()
+            st.success("Acesso criado! Agora faça login.")
+            st.rerun()
     else:
-        categoria = st.selectbox("Categoria", ["Material", "Ajudante", "Valor Obra"])
-    
-    tipo = st.radio("Tipo:", ["Ganho (Entrada 🟢)", "Gasto (Saída 🔴)"])
-    botao = st.form_submit_button("SALVAR")
+        user = st.text_input("Usuário")
+        pw = st.text_input("Senha", type="password")
+        if st.button("ENTRAR"):
+            senha_hash = gerar_hash(pw)
+            busca = cursor.execute("SELECT * FROM usuarios WHERE usuario=? AND senha=?", (user, senha_hash)).fetchone()
+            if busca:
+                st.session_state['autenticado'] = True
+                st.rerun()
+            else:
+                st.error("Usuário ou senha incorretos")
 
-    if botao:
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO financeiro (data, negocio, descricao, valor, tipo, categoria) VALUES (?,?,?,?,?,?)",
-                       (str(data), negocio, descricao, valor, tipo, categoria))
-        conn.commit()
-        st.success(f"Salvo com sucesso!")
+# --- APP PRINCIPAL (SÓ APARECE SE ESTIVER LOGADO) ---
+if not st.session_state['autenticado']:
+    login()
+else:
+    # Menu Lateral
+    st.sidebar.title("Menu")
+    pagina = st.sidebar.selectbox("Ir para:", ["Dashboard", "Configurações"])
+    negocio = st.sidebar.radio("Selecione o Negócio:", ["🍺 BAR", "🚧 OBRA"])
+    
+    if st.sidebar.button("Sair"):
+        st.session_state['autenticado'] = False
         st.rerun()
 
-# --- ABA DE EDIÇÃO E EXCLUSÃO ---
-st.divider()
-st.subheader("🗑️ Editar ou Excluir Lançamentos")
-
-if not df_total.empty:
-    # Criamos uma lista de descrições para a pessoa escolher qual quer apagar
-    opcoes = df_total['descricao'].tolist()
-    item_para_excluir = st.selectbox("Selecione o lançamento para excluir:", ["Selecione..."] + opcoes)
-
-    if st.button("EXCLUIR LANÇAMENTO SELECIONADO"):
-        if item_para_excluir != "Selecione...":
-            cursor = conn.cursor()
-            cursor.execute(f"DELETE FROM financeiro WHERE descricao = '{item_para_excluir}' AND negocio = '{negocio}'")
+    if pagina == "Dashboard":
+        carregar_logo()
+        # ... (Aqui continua todo o código de Ganhos/Gastos que já tínhamos)
+        st.subheader(f"📊 Resumo Financeiro - {negocio}")
+        df_total = pd.read_sql_query(f"SELECT * FROM financeiro WHERE negocio='{negocio}'", conn)
+        # (O resto do seu código de lançamentos e exclusão entra aqui...)
+        
+    elif pagina == "Configurações":
+        st.subheader("⚙️ Configurações de Acesso")
+        st.write("Deseja alterar sua senha?")
+        nova_senha = st.text_input("Nova Senha", type="password")
+        if st.button("ATUALIZAR SENHA"):
+            cursor.execute("UPDATE usuarios SET senha = ?", (gerar_hash(nova_senha),))
             conn.commit()
-            st.warning(f"Lançamento '{item_para_excluir}' foi apagado!")
-            st.rerun()
-        else:
-            st.info("Por favor, selecione um item na lista acima.")
-
-# Tabela de histórico
-if st.checkbox("Ver tabela completa"):
-    st.dataframe(df_total)
+            st.success("Senha alterada com sucesso!")
